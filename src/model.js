@@ -1,16 +1,46 @@
+import { campus, legacyRestaurants, restaurants } from './restaurants.js'
+
+export { campus, restaurants }
 export const days = ['일', '월', '화', '수', '목', '금', '토']
-export const categories = ['전체', '중식', '한식', '일식', '분식', '양식']
+export const categories = ['전체', '중식', '한식', '일식', '분식', '양식', '베트남식']
 export const hours = [10, 11, 12, 13, 14, 15, 16]
 export const ratingLabels = ['불만족', '보통', '만족']
-export const restaurants = [
-  { id: 'cheong', name: '중화요리 청', icon: '🥟', category: '중식', meters: 250, wait: 5, x: 35, y: 24, menu: [['짜장면', 6500], ['짬뽕', 8500]] },
-  { id: 'momo', name: '모모키친', icon: '🍛', category: '일식', meters: 420, wait: 6, x: 75, y: 29, menu: [['카레라이스', 9500], ['치즈 돈카츠', 12000]] },
-  { id: 'bap', name: '캠퍼스 한끼', icon: '🍚', category: '한식', meters: 160, wait: 3, x: 20, y: 51, menu: [['제육 덮밥', 8000], ['순두부찌개', 8500]] },
-  { id: 'hong', name: '홍홍 마라', icon: '🍜', category: '중식', meters: 380, wait: 8, x: 56, y: 61, menu: [['미니 마라탕', 9000], ['꿔바로우 세트', 13500]] },
-  { id: 'bunsik', name: '정문 앞 분식', icon: '🍙', category: '분식', meters: 310, wait: 4, x: 24, y: 82, menu: [['떡볶이', 4500], ['참치 김밥', 4000]] },
-  { id: 'ming', name: '밍키 짜장', icon: '🥢', category: '중식', meters: 460, wait: 10, x: 82, y: 54, menu: [['간짜장', 8500], ['볶음밥', 9000]] },
-  { id: 'pasta', name: '초록 파스타', icon: '🍝', category: '양식', meters: 570, wait: 14, x: 77, y: 83, menu: [['토마토 파스타', 10500], ['크림 파스타', 11500]] },
-]
+const restaurantRecords = new Map([...restaurants, ...legacyRestaurants].map(restaurant => [restaurant.id, restaurant]))
+export const restaurantForRecord = id => restaurantRecords.get(id)
+
+export function straightDistance(origin, destination) {
+  if (!destination) return null
+  const radians = degrees => degrees * Math.PI / 180
+  const deltaLat = radians(destination.latitude - origin.latitude)
+  const deltaLon = radians(destination.longitude - origin.longitude)
+  const a = Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(radians(origin.latitude)) * Math.cos(radians(destination.latitude)) * Math.sin(deltaLon / 2) ** 2
+  return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, a)))
+}
+
+export function formatDistance(meters) {
+  if (meters == null) return '직선거리 정보 확인 필요'
+  return '직선거리 ' + (meters < 1000 ? Math.min(999, Math.round(meters)) + ' m' : (meters / 1000).toFixed(2) + ' km')
+}
+
+export function compareDistance(a, b) {
+  return (a.meters ?? Infinity) - (b.meters ?? Infinity) || a.name.localeCompare(b.name, 'ko')
+}
+
+export function requestLocation(geolocation, onSuccess, onError) {
+  if (!geolocation) {
+    onError('이 브라우저에서 위치를 사용할 수 없어요.')
+    return
+  }
+  geolocation.getCurrentPosition(({ coords }) => {
+    const { latitude, longitude, accuracy } = coords
+    onSuccess({ latitude, longitude, accuracy })
+  }, error => {
+    onError(error.code === 1
+      ? '위치 권한이 거부됐어요. 브라우저 설정에서 허용한 뒤 다시 요청할 수 있어요.'
+      : '현재 위치를 가져오지 못했어요. 잠시 후 다시 요청해 주세요.')
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 })
+}
 
 export const storageKey = 'kkini-pick.v1'
 export const dateObject = date => new Date(date + 'T00:00:00Z')
@@ -24,7 +54,7 @@ export function tomorrow(date) {
 export function initialState() {
   return {
     date: new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date()),
-    filters: { budget: 10000, maxWait: 10, category: '중식' },
+    filters: { budget: 10000, maxWait: 10, category: '전체' },
     visits: [],
     pending: [],
   }
@@ -72,7 +102,7 @@ function validNumber(value) {
 function validVisit(item) {
   return item && typeof item.id === 'string' && validDate(item.date) &&
     Number.isFinite(item.predicted) && item.predicted >= 0 &&
-    restaurants.some(restaurant => restaurant.id === item.restaurantId)
+    restaurantRecords.has(item.restaurantId)
 }
 
 export function newVisitId() {
@@ -85,7 +115,7 @@ export function predict(restaurant, date, visits, hour = 12) {
   const last = history.at(-1)
   const offset = last && last.actual - last.predicted >= 5 ? 10 : 0
   const blockedFirst = history.slice(-2).length === 2 && history.slice(-2).every(visit => visit.rating === 0)
-  const dayOffset = restaurant.id === 'cheong' ? 0 : (weekday(date) + restaurant.meters) % 3 - 1
+  const dayOffset = (weekday(date) + restaurant.id.length) % 3 - 1
   const base = Math.max(0, restaurant.wait + dayOffset - Math.abs(hour - 12) * 3)
   const wait = base + offset
   return { ...restaurant, wait, offset, blockedFirst, queue: Math.ceil(wait / 3), crowd: crowdLabel(wait) }
@@ -98,9 +128,9 @@ export function crowdLabel(wait) {
 export function recommend(dining, filters) {
   const sorted = dining.filter(restaurant =>
     restaurant.wait <= filters.maxWait &&
-    restaurant.menu.some(([, price]) => price <= filters.budget) &&
+    restaurant.menu.some(([, price]) => Number.isFinite(price) && price <= filters.budget) &&
     (filters.category === '전체' || restaurant.category === filters.category),
-  ).sort((a, b) => Boolean(a.offset) - Boolean(b.offset) || a.wait - b.wait || a.meters - b.meters)
+  ).sort((a, b) => Boolean(a.offset) - Boolean(b.offset) || a.wait - b.wait || compareDistance(a, b))
   const first = sorted.find(restaurant => !restaurant.blockedFirst)
   const remaining = sorted.filter(restaurant => restaurant !== first)
   return [

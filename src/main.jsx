@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { categories, crowdLabel, days, hours, initialState, loadState, newVisitId, predict, ratingLabels, recommend, restaurants, storageKey, summarize, tomorrow, weekday } from './model'
+import { campus, categories, compareDistance, crowdLabel, days, formatDistance, hours, initialState, loadState, newVisitId, predict, ratingLabels, recommend, requestLocation, restaurantForRecord, restaurants, storageKey, straightDistance, summarize, tomorrow, weekday } from './model'
 import './style.css'
 
 const won = value => value.toLocaleString('ko-KR') + '원'
@@ -16,8 +16,17 @@ function App() {
   const [active, setActive] = useState(null)
   const [notice, setNotice] = useState('')
   const [storageError, setStorageError] = useState(false)
+  const [location, setLocation] = useState(null)
+  const [locating, setLocating] = useState(false)
+  const [locationError, setLocationError] = useState('')
+  const [nearest, setNearest] = useState(false)
   const { date, visits, pending, filters } = state
-  const dining = restaurants.map(restaurant => predict(restaurant, date, visits))
+  const distanceOrigin = location ? '내 위치' : '국립한밭대학교 유성덕명캠퍼스'
+  const dining = restaurants.map(restaurant => ({
+    ...predict(restaurant, date, visits),
+    meters: straightDistance(location ?? campus, restaurant.position),
+  }))
+  const nearby = nearest ? [...dining].sort(compareDistance) : dining
   const picks = recommend(dining, filters)
   const current = dining.find(restaurant => restaurant.id === detail)
 
@@ -49,6 +58,26 @@ function App() {
     window.scrollTo(0, 0)
   }
 
+  function findNearby() {
+    setLocating(true)
+    setLocationError('')
+    const usePosition = position => {
+      setLocation(position)
+      setNearest(true)
+      setLocating(false)
+    }
+    const useCampus = message => {
+      setLocation(null)
+      setLocationError(message)
+      setLocating(false)
+    }
+    try {
+      requestLocation(navigator.geolocation, usePosition, useCampus)
+    } catch {
+      useCampus('현재 위치를 사용할 수 없어요. 브라우저의 위치 권한을 확인해 주세요.')
+    }
+  }
+
   function pick(restaurant) {
     if (pending.some(item => item.restaurantId === restaurant.id && item.date === date)) {
       navigate('내 기록')
@@ -61,7 +90,7 @@ function App() {
   }
 
   function save(item, actual, rating, reason) {
-    const restaurant = restaurants.find(entry => entry.id === item.restaurantId)
+    const restaurant = restaurantForRecord(item.restaurantId)
     const { id, date, predicted, restaurantId } = item
     const visit = { id, date, predicted, restaurantId, name: restaurant.name, category: restaurant.category, actual, rating, reason }
     setState(previous => ({
@@ -94,7 +123,7 @@ function App() {
     <main>
       {storageError && <p role="alert" className="notice">브라우저 저장 공간을 사용할 수 없어요. 새로고침하면 변경 내용이 사라질 수 있어요.</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
-      {current ? <Detail restaurant={current} date={date} visits={visits} onBack={() => setDetail(null)} onPick={() => pick(current)} />
+      {current ? <Detail restaurant={current} date={date} visits={visits} distanceOrigin={distanceOrigin} onBack={() => setDetail(null)} onPick={() => pick(current)} />
         : view === '지도' ? <>
           <section className="intro">
             <div><p className="eyebrow">캠퍼스 점심 지도</p><h1>오늘 뭐 먹지<span>?</span></h1><p>예산과 시간에 딱 맞는 캠퍼스 근처 한 끼를 찾아봐요.</p></div>
@@ -108,28 +137,37 @@ function App() {
           </form>
           <div className="dashboard">
             <section className="panel map-card">
-              <div className="section-title"><h2>캠퍼스 주변</h2><span className="badge">데모 지도</span></div>
-              <div className="map">
-                <div className="park park-a" /><div className="park park-b" />
-                <div className="road road-a" /><div className="road road-b" /><div className="road road-c" /><div className="road road-d" />
-                <div className="map-label campus">🎓 캠퍼스</div><div className="map-label gate">정문</div><div className="map-label library">중앙도서관</div>
-                {dining.map(restaurant => {
-                  const rank = picks.find(item => item.id === restaurant.id)?.rank
-                  return <button key={restaurant.id} className={'pin ' + (rank ? 'ranked' : '')} style={{ left: restaurant.x + '%', top: restaurant.y + '%' }}
-                    aria-label={restaurant.name + ', ' + restaurant.crowd + ', 예상 ' + restaurant.wait + '분'} onClick={() => openDetail(restaurant.id)}>
-                    <span>{restaurant.icon}</span>{rank && <b>{rank}</b>}<small>{restaurant.wait}분</small>
-                  </button>
-                })}
+              <div className="section-title"><h2>캠퍼스 주변</h2><span className="badge">{nearby.length}곳</span></div>
+              <div className="location-actions">
+                <button className="primary" onClick={findNearby} disabled={locating}>
+                  {locating ? '위치 확인 중…' : locationError ? '위치 권한 다시 요청하기' : '내 위치로 주변 식당 찾기'}
+                </button>
+                {(location || locationError) && <button className="secondary" disabled={locating} onClick={() => {
+                  setLocation(null)
+                  setNearest(true)
+                }}>학교 기준으로 보기</button>}
               </div>
-              <div className="map-legend"><span>● 추천 식당</span><span>지도 위 식당을 눌러 자세히 보기</span></div>
+              <p role="status" className="muted">
+                {locationError && <>{locationError}<br /></>}
+                거리 기준 · {distanceOrigin}{location && ` (위치 정확도 약 ±${Math.ceil(location.accuracy)} m)`}
+              </p>
+              <p className="muted fine">직선거리는 실제 이동 거리와 달라요. GPS 정확도에 따라 오차가 생길 수 있어요.
+                {!location && <> <a href={campus.source} target="_blank" rel="noreferrer">학교 기준점 확인</a></>}
+              </p>
+              <label className="distance-sort">정렬
+                <select value={nearest ? 'nearest' : 'default'} onChange={event => setNearest(event.target.value === 'nearest')}>
+                  <option value="default">기본순</option>
+                  <option value="nearest">가까운 식당순</option>
+                </select>
+              </label>
+              {nearby.map(restaurant => <RestaurantCard key={restaurant.id} restaurant={restaurant} onOpen={openDetail} />)}
             </section>
             <section className="panel picks">
               <div className="section-title"><h2>오늘의 추천</h2><span className="badge">{picks.length}곳</span></div>
               <p className="muted">{won(Number(filters.budget))} 이하 · {filters.maxWait}분 이내 · {filters.category}</p>
-              {picks.length ? picks.map(restaurant => <button className="pick-row" key={restaurant.id} onClick={() => openDetail(restaurant.id)}>
-                <span className="food-icon">{restaurant.icon}</span><span className="pick-copy"><small>{restaurant.rank}순위 · {restaurant.category}</small><strong>{restaurant.name}</strong><small>{won(Math.min(...restaurant.menu.map(([, price]) => price)))}부터 · {restaurant.meters}m</small></span><span className={'wait ' + restaurant.crowd}>{restaurant.wait}분</span>
-              </button>) : <p className="empty">조건에 맞는 식당이 없어요. 예산이나 허용 대기시간을 늘려 보세요.</p>}
-              <p className="muted fine">예측 대기시간과 혼잡도는 테스트 데이터예요.</p>
+              {picks.length ? picks.map(restaurant => <RestaurantCard key={restaurant.id} restaurant={restaurant} onOpen={openDetail} />)
+                : <p className="empty">확인된 가격으로 조건에 맞는 식당이 없어요. 예산, 대기시간 또는 음식 종류를 바꿔 보세요.</p>}
+              <p className="muted fine">거리 기준 · {distanceOrigin}<br />가격이 확인된 메뉴만 예산 추천에 반영해요. 예상 대기시간과 혼잡도는 예시예요.</p>
             </section>
           </div>
         </> : view === '마이픽' ? <MyPick visits={visits} date={date} dining={dining} openDetail={openDetail} />
@@ -143,17 +181,40 @@ function App() {
   </>
 }
 
-function Detail({ restaurant, date, visits, onBack, onPick }) {
+function RestaurantCard({ restaurant, onOpen }) {
+  const prices = restaurant.menu.map(([, price]) => price).filter(Number.isFinite)
+  return <button className="pick-row" onClick={() => onOpen(restaurant.id)}>
+    <span className="food-icon" aria-hidden="true">{restaurant.icon}</span>
+    <span className="pick-copy">
+      <small>{restaurant.rank && restaurant.rank + '순위 · '}{restaurant.category}</small>
+      <strong>{restaurant.name}</strong>
+      <small>{prices.length ? won(Math.min(...prices)) + '부터' : '가격 정보 확인 필요'}</small>
+      <small>{formatDistance(restaurant.meters)}</small>
+    </span>
+    <span className={'wait ' + restaurant.crowd}>예상 {restaurant.wait}분</span>
+  </button>
+}
+
+function Detail({ restaurant, date, visits, distanceOrigin, onBack, onPick }) {
   const values = hours.map(hour => predict(restaurant, date, visits, hour).wait)
   const max = Math.max(1, ...values)
   return <>
     <button className="secondary back" onClick={onBack}>돌아가기</button>
     <section className="panel content">
-      <div className="detail-heading"><span className="food-icon">{restaurant.icon}</span><div><p className="eyebrow">{restaurant.category} · 캠퍼스에서 {restaurant.meters}m</p><h1>{restaurant.name}</h1></div></div>
+      <div className="detail-heading"><span className="food-icon">{restaurant.icon}</span><div><p className="eyebrow">{restaurant.category}</p><h1>{restaurant.name}</h1></div></div>
+      <p>{restaurant.address}<br />{distanceOrigin} 기준 · {formatDistance(restaurant.meters)}</p>
+      <div className="location-actions">
+        <a href={restaurant.mapUrl} target="_blank" rel="noreferrer">카카오맵에서 식당 보기</a>
+        <a href={restaurant.source} target="_blank" rel="noreferrer">식당 정보 출처</a>
+        {restaurant.coordinateSource && <a href={restaurant.coordinateSource} target="_blank" rel="noreferrer">좌표 출처</a>}
+      </div>
       <div className="stats"><div>예측 대기 <strong>{restaurant.wait}분</strong></div><div>예측 대기 인원 <strong>{restaurant.queue}명</strong></div><div>예측 혼잡도 <strong>{restaurant.crowd}</strong></div></div>
       {restaurant.offset > 0 && <p className="notice">최근 방문 기록을 반영해 예측 대기시간에 {restaurant.offset}분을 더했어요.</p>}
+      <p className="muted fine">예상 대기시간, 대기 인원, 혼잡도는 예시예요.</p>
       <h2>대표 메뉴</h2>
-      {restaurant.menu.map(([name, price]) => <div className="line" key={name}><span>{name}</span><strong>{won(price)}</strong></div>)}
+      {restaurant.menu.length ? restaurant.menu.map(([name, price, from]) => <div className="line" key={name}><span>{name}</span><strong>{price == null ? '가격 정보 확인 필요' : won(price) + (from ? '부터' : '')}</strong></div>)
+        : <p className="muted">메뉴와 가격 정보 확인 필요</p>}
+      {restaurant.menu.some(([, price]) => price != null) && <p className="muted fine">공개 자료를 기준으로 표시한 가격이며 매장 가격은 달라질 수 있어요.</p>}
       <h2>시간대별 예측 대기시간</h2>
       <div className="chart">{values.map((wait, index) => <div key={hours[index]}><strong>{wait}분</strong><div className="bar-track"><span style={{ height: (wait / max * 100) + '%' }} /></div><small>{hours[index]}시</small></div>)}</div>
       <button className="primary full" onClick={onPick}>이 식당으로 픽!</button>
@@ -181,7 +242,10 @@ function MyPick({ visits, date, dining, openDetail }) {
       const top = groups.sort((a, b) => b.rating - a.rating || b.count - a.count || a.wait - b.wait)[0]
       const restaurant = dining.find(item => item.id === top?.key)
       const averageWait = dayVisits.reduce((sum, visit) => sum + visit.actual, 0) / dayVisits.length
-      return <div className="line weekday" key={day}><strong>{days[day]}요일</strong>{restaurant ? <><button className="text-button" onClick={() => openDetail(restaurant.id)}>{restaurant.name}</button><span>{crowdLabel(averageWait)} · 평균 {averageWait.toFixed(1)}분</span></> : <span className="muted">기록 없음</span>}</div>
+      return <div className="line weekday" key={day}><strong>{days[day]}요일</strong>{top ? <>{restaurant
+        ? <button className="text-button" onClick={() => openDetail(restaurant.id)}>{restaurant.name}</button>
+        : <span>{restaurantForRecord(top.key).name} (이전 테스트)</span>}
+        <span>{crowdLabel(averageWait)} · 평균 {averageWait.toFixed(1)}분</span></> : <span className="muted">기록 없음</span>}</div>
     })}
   </section>
 }
@@ -199,14 +263,14 @@ function Records({ date, visits, pending, dining, onOpen }) {
       <label>방문한 식당<select value={restaurantId} onChange={event => setRestaurantId(event.target.value)}>{dining.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <button className="primary">방문 기록하기</button>
     </form>
-    {pending.length > 0 && <><h2>기록을 기다리는 식당</h2>{pending.map(item => <div className="line" key={item.id}><div><strong>{dining.find(entry => entry.id === item.restaurantId).name}</strong><br /><small>{niceDate(item.date)} · 예측 {item.predicted}분</small></div><button className="secondary" onClick={() => onOpen(item)}>지금 기록</button></div>)}</>}
+    {pending.length > 0 && <><h2>기록을 기다리는 식당</h2>{pending.map(item => <div className="line" key={item.id}><div><strong>{restaurantForRecord(item.restaurantId).name}</strong><br /><small>{niceDate(item.date)} · 예측 {item.predicted}분</small></div><button className="secondary" onClick={() => onOpen(item)}>지금 기록</button></div>)}</>}
     <h2>저장한 방문 ({visits.length})</h2>
     {visits.length ? [...visits].reverse().map(item => <article className="line" key={item.id}><div><strong>{item.name}</strong><br /><small>{item.date} ({days[weekday(item.date)]}) · 예측 {item.predicted}분 · 실제 {item.actual}분{item.reason && ' · ' + item.reason}</small></div><span className="badge">{ratingLabels[item.rating]}</span></article>) : <p className="empty">아직 저장한 방문이 없어요.</p>}
   </section>
 }
 
 function VisitForm({ item, onClose, onSave }) {
-  const restaurant = restaurants.find(entry => entry.id === item.restaurantId)
+  const restaurant = restaurantForRecord(item.restaurantId)
   const dialog = React.useRef(null)
   useEffect(() => { dialog.current.showModal() }, [])
   return <dialog ref={dialog} onCancel={event => { event.preventDefault(); onClose() }}>
