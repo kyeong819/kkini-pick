@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { campus, categories, compareDistance, crowdLabel, days, formatDistance, hours, initialState, loadState, newVisitId, predict, ratingLabels, recommend, requestLocation, restaurantForRecord, restaurants, storageKey, straightDistance, summarize, tomorrow, weekday } from './model'
+import CampusMap from './CampusMap'
 import './style.css'
 
 const won = value => value.toLocaleString('ko-KR') + '원'
@@ -12,6 +13,8 @@ function App() {
   const [state, setState] = useState(loadState)
   const [view, setView] = useState('지도')
   const [detail, setDetail] = useState(null)
+  const [mapSelection, setMapSelection] = useState(null)
+  const [mapCenterRevision, setMapCenterRevision] = useState(0)
   const [draft, setDraft] = useState(state.filters)
   const [active, setActive] = useState(null)
   const [notice, setNotice] = useState('')
@@ -29,6 +32,7 @@ function App() {
   const nearby = nearest ? [...dining].sort(compareDistance) : dining
   const picks = recommend(dining, filters)
   const current = dining.find(restaurant => restaurant.id === detail)
+  const selectedOnMap = dining.find(restaurant => restaurant.id === mapSelection)
 
   useEffect(() => {
     try {
@@ -49,6 +53,7 @@ function App() {
   function navigate(next) {
     setView(next)
     setDetail(null)
+    setMapSelection(null)
     setNotice('')
     window.scrollTo(0, 0)
   }
@@ -67,7 +72,7 @@ function App() {
       setLocating(false)
     }
     const useCampus = message => {
-      setLocation(null)
+      centerOnCampus()
       setLocationError(message)
       setLocating(false)
     }
@@ -76,6 +81,12 @@ function App() {
     } catch {
       useCampus('현재 위치를 사용할 수 없어요. 브라우저의 위치 권한을 확인해 주세요.')
     }
+  }
+
+  function centerOnCampus() {
+    setLocation(null)
+    setMapSelection(null)
+    setMapCenterRevision(previous => previous + 1)
   }
 
   function pick(restaurant) {
@@ -123,7 +134,7 @@ function App() {
     <main>
       {storageError && <p role="alert" className="notice">브라우저 저장 공간을 사용할 수 없어요. 새로고침하면 변경 내용이 사라질 수 있어요.</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
-      {current ? <Detail restaurant={current} date={date} visits={visits} distanceOrigin={distanceOrigin} onBack={() => setDetail(null)} onPick={() => pick(current)} />
+      {current ? <Detail restaurant={current} date={date} visits={visits} location={location} distanceOrigin={distanceOrigin} recommendations={picks} onSelect={setDetail} onBack={() => setDetail(null)} onPick={() => pick(current)} />
         : view === '지도' ? <>
           <section className="intro">
             <div><p className="eyebrow">캠퍼스 점심 지도</p><h1>오늘 뭐 먹지<span>?</span></h1><p>예산과 시간에 딱 맞는 캠퍼스 근처 한 끼를 찾아봐요.</p></div>
@@ -143,7 +154,7 @@ function App() {
                   {locating ? '위치 확인 중…' : locationError ? '위치 권한 다시 요청하기' : '내 위치로 주변 식당 찾기'}
                 </button>
                 {(location || locationError) && <button className="secondary" disabled={locating} onClick={() => {
-                  setLocation(null)
+                  centerOnCampus()
                   setNearest(true)
                 }}>학교 기준으로 보기</button>}
               </div>
@@ -154,6 +165,16 @@ function App() {
               <p className="muted fine">직선거리는 실제 이동 거리와 달라요. GPS 정확도에 따라 오차가 생길 수 있어요.
                 {!location && <> <a href={campus.source} target="_blank" rel="noreferrer">학교 기준점 확인</a></>}
               </p>
+              <CampusMap location={location} selectedId={mapSelection} onSelect={setMapSelection} centerRevision={mapCenterRevision} recommendations={picks} />
+              {selectedOnMap && <section className="marker-detail" aria-label="선택한 식당">
+                <h3>{selectedOnMap.name}</h3>
+                <RestaurantLocation restaurant={selectedOnMap} distanceOrigin={distanceOrigin} />
+                <RestaurantMenu restaurant={selectedOnMap} />
+                <div className="location-actions">
+                  <ExternalMapLink restaurant={selectedOnMap} />
+                  <button className="secondary" onClick={() => openDetail(selectedOnMap.id)}>식당 상세 보기</button>
+                </div>
+              </section>}
               <label className="distance-sort">정렬
                 <select value={nearest ? 'nearest' : 'default'} onChange={event => setNearest(event.target.value === 'nearest')}>
                   <option value="default">기본순</option>
@@ -195,25 +216,38 @@ function RestaurantCard({ restaurant, onOpen }) {
   </button>
 }
 
-function Detail({ restaurant, date, visits, distanceOrigin, onBack, onPick }) {
+function RestaurantLocation({ restaurant, distanceOrigin }) {
+  return <p>{restaurant.category} · {restaurant.address}<br />{distanceOrigin} 기준 · {formatDistance(restaurant.meters)}</p>
+}
+
+function ExternalMapLink({ restaurant }) {
+  return <a href={restaurant.mapUrl} target="_blank" rel="noreferrer">{restaurant.position ? '외부 지도에서 위치 보기' : '외부 지도에서 식당 검색'}</a>
+}
+
+function RestaurantMenu({ restaurant }) {
+  return restaurant.menu.length ? restaurant.menu.map(([name, price, from]) => <div className="line" key={name}><span>{name}</span><strong>{price == null ? '가격 정보 확인 필요' : won(price) + (from ? '부터' : '')}</strong></div>)
+    : <p className="muted">메뉴와 가격 정보 확인 필요</p>
+}
+
+function Detail({ restaurant, date, visits, location, distanceOrigin, recommendations, onSelect, onBack, onPick }) {
   const values = hours.map(hour => predict(restaurant, date, visits, hour).wait)
   const max = Math.max(1, ...values)
   return <>
     <button className="secondary back" onClick={onBack}>돌아가기</button>
     <section className="panel content">
-      <div className="detail-heading"><span className="food-icon">{restaurant.icon}</span><div><p className="eyebrow">{restaurant.category}</p><h1>{restaurant.name}</h1></div></div>
-      <p>{restaurant.address}<br />{distanceOrigin} 기준 · {formatDistance(restaurant.meters)}</p>
+      <div className="detail-heading"><span className="food-icon">{restaurant.icon}</span><h1>{restaurant.name}</h1></div>
+      <RestaurantLocation restaurant={restaurant} distanceOrigin={distanceOrigin} />
       <div className="location-actions">
-        <a href={restaurant.mapUrl} target="_blank" rel="noreferrer">카카오맵에서 식당 보기</a>
+        <ExternalMapLink restaurant={restaurant} />
         <a href={restaurant.source} target="_blank" rel="noreferrer">식당 정보 출처</a>
         {restaurant.coordinateSource && <a href={restaurant.coordinateSource} target="_blank" rel="noreferrer">좌표 출처</a>}
       </div>
+      {restaurant.position && <CampusMap location={location} selectedId={restaurant.id} onSelect={onSelect} recommendations={recommendations} />}
       <div className="stats"><div>예측 대기 <strong>{restaurant.wait}분</strong></div><div>예측 대기 인원 <strong>{restaurant.queue}명</strong></div><div>예측 혼잡도 <strong>{restaurant.crowd}</strong></div></div>
       {restaurant.offset > 0 && <p className="notice">최근 방문 기록을 반영해 예측 대기시간에 {restaurant.offset}분을 더했어요.</p>}
       <p className="muted fine">예상 대기시간, 대기 인원, 혼잡도는 예시예요.</p>
       <h2>대표 메뉴</h2>
-      {restaurant.menu.length ? restaurant.menu.map(([name, price, from]) => <div className="line" key={name}><span>{name}</span><strong>{price == null ? '가격 정보 확인 필요' : won(price) + (from ? '부터' : '')}</strong></div>)
-        : <p className="muted">메뉴와 가격 정보 확인 필요</p>}
+      <RestaurantMenu restaurant={restaurant} />
       {restaurant.menu.some(([, price]) => price != null) && <p className="muted fine">공개 자료를 기준으로 표시한 가격이며 매장 가격은 달라질 수 있어요.</p>}
       <h2>시간대별 예측 대기시간</h2>
       <div className="chart">{values.map((wait, index) => <div key={hours[index]}><strong>{wait}분</strong><div className="bar-track"><span style={{ height: (wait / max * 100) + '%' }} /></div><small>{hours[index]}시</small></div>)}</div>

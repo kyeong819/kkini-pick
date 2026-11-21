@@ -50,11 +50,14 @@ const listings = [
 
 export const restaurants = listings.map(({ street, ...restaurant }) => {
   const address = '대전광역시 유성구 ' + street
+  const { latitude, longitude } = restaurant.position ?? {}
   return {
     ...restaurant,
     address,
     wait: 8, // Shared example baseline, with no live queue data.
-    mapUrl: 'https://map.kakao.com/?q=' + encodeURIComponent(restaurant.name + ' ' + address),
+    mapUrl: restaurant.position
+      ? `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=18/${latitude}/${longitude}`
+      : 'https://map.naver.com/p/search/' + encodeURIComponent(restaurant.name + ' ' + address),
   }
 })
 
