@@ -54,7 +54,7 @@ function createRestaurantMarkers(map, onSelect) {
   })
 }
 
-export default function CampusMap({ location, selectedId, onSelect, centerRevision, recommendations = [] }) {
+export default function CampusMap({ location, selectedId, onSelect, centerRevision, recommendations = [], children }) {
   const container = useRef(null)
   const instance = useRef(null)
   const [tileError, setTileError] = useState(false)
@@ -138,13 +138,25 @@ export default function CampusMap({ location, selectedId, onSelect, centerRevisi
   }, [recommendations, onSelect])
 
   return <div className="campus-map">
-    <div className="campus-map-canvas" ref={container} role="region" aria-label="캠퍼스 주변 식당 지도" />
-    <div className="campus-map-tools">
-      <button className="secondary" onClick={() => showCampus(instance.current.map)}>캠퍼스 중심으로 이동</button>
-      {recommendations.some(restaurant => restaurant.position) && <span className="map-recommendation-key muted fine">초록 점 · 추천 식당</span>}
-      <span className="muted fine">{restaurants.length - [...markerGroups.values()].flat().length}곳은 좌표 확인이 필요해 목록에서만 볼 수 있어요.</span>
+    <div className="campus-map-frame">
+      <div className="campus-map-canvas" ref={container} role="region" aria-label="캠퍼스 주변 식당 지도" />
+      <div className="campus-map-controls">
+        <button className="secondary" aria-label="캠퍼스 중심으로 이동" title="캠퍼스 중심으로 이동" onClick={() => showCampus(instance.current.map)}>⌖</button>
+        <details className="map-help">
+          <summary aria-label="지도 도움말" title="지도 도움말">?</summary>
+          <div className="map-help-copy">
+            <p>마커를 눌러 식당을 확인하고, +와 −로 지도를 확대하거나 축소할 수 있어요.</p>
+            <p className="map-recommendation-key">초록 점은 추천 식당이에요. 가격이 확인된 메뉴만 예산 추천에 반영되며, 예상 대기시간과 혼잡도는 예시예요.</p>
+            <p>거리는 {location ? '내 위치' : '학교'} 기준 직선거리예요. 실제 이동 거리는 달라요.
+              {location ? ` GPS 정확도 약 ±${Math.ceil(location.accuracy)} m.` : <> <a href={campus.source} target="_blank" rel="noreferrer">학교 기준점 확인</a></>}
+            </p>
+            {locationOutside && <p>내 위치가 현재 지도 범위 밖이에요. 지도를 직접 이동해 확인할 수 있어요.</p>}
+            <p>좌표가 확인되지 않은 식당은 목록에서 볼 수 있어요.</p>
+          </div>
+        </details>
+      </div>
+      {children}
     </div>
-    {locationOutside && <p className="muted fine">내 위치가 현재 지도 범위 밖이에요. 지도를 직접 이동할 수 있고, 목록에는 내 위치 기준 직선거리가 표시돼요.</p>}
     {tileError && <div className="campus-map-tools">
       <p role="status" className="muted">일부 지도 타일을 불러오지 못했어요. 마커와 식당 목록은 계속 이용할 수 있어요.</p>
       <button className="secondary" onClick={() => {

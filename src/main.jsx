@@ -158,23 +158,11 @@ function App() {
                   setNearest(true)
                 }}>학교 기준으로 보기</button>}
               </div>
-              <p role="status" className="muted">
-                {locationError && <>{locationError}<br /></>}
-                거리 기준 · {distanceOrigin}{location && ` (위치 정확도 약 ±${Math.ceil(location.accuracy)} m)`}
-              </p>
-              <p className="muted fine">직선거리는 실제 이동 거리와 달라요. GPS 정확도에 따라 오차가 생길 수 있어요.
-                {!location && <> <a href={campus.source} target="_blank" rel="noreferrer">학교 기준점 확인</a></>}
-              </p>
-              <CampusMap location={location} selectedId={mapSelection} onSelect={setMapSelection} centerRevision={mapCenterRevision} recommendations={picks} />
-              {selectedOnMap && <section className="marker-detail" aria-label="선택한 식당">
-                <h3>{selectedOnMap.name}</h3>
-                <RestaurantLocation restaurant={selectedOnMap} distanceOrigin={distanceOrigin} />
-                <RestaurantMenu restaurant={selectedOnMap} />
-                <div className="location-actions">
-                  <ExternalMapLink restaurant={selectedOnMap} />
-                  <button className="secondary" onClick={() => openDetail(selectedOnMap.id)}>식당 상세 보기</button>
-                </div>
-              </section>}
+              {locationError && <p role="status" className="muted fine">{locationError}</p>}
+              <CampusMap location={location} selectedId={mapSelection} onSelect={setMapSelection} centerRevision={mapCenterRevision} recommendations={picks}>
+                {selectedOnMap && <MarkerSummary restaurant={selectedOnMap} useCurrentLocation={Boolean(location)}
+                  onClose={() => setMapSelection(null)} onDetails={() => openDetail(selectedOnMap.id)} />}
+              </CampusMap>
               <label className="distance-sort">정렬
                 <select value={nearest ? 'nearest' : 'default'} onChange={event => setNearest(event.target.value === 'nearest')}>
                   <option value="default">기본순</option>
@@ -188,7 +176,6 @@ function App() {
               <p className="muted">{won(Number(filters.budget))} 이하 · {filters.maxWait}분 이내 · {filters.category}</p>
               {picks.length ? picks.map(restaurant => <RestaurantCard key={restaurant.id} restaurant={restaurant} onOpen={openDetail} />)
                 : <p className="empty">확인된 가격으로 조건에 맞는 식당이 없어요. 예산, 대기시간 또는 음식 종류를 바꿔 보세요.</p>}
-              <p className="muted fine">거리 기준 · {distanceOrigin}<br />가격이 확인된 메뉴만 예산 추천에 반영해요. 예상 대기시간과 혼잡도는 예시예요.</p>
             </section>
           </div>
         </> : view === '마이픽' ? <MyPick visits={visits} date={date} dining={dining} openDetail={openDetail} />
@@ -220,12 +207,33 @@ function RestaurantLocation({ restaurant, distanceOrigin }) {
   return <p>{restaurant.category} · {restaurant.address}<br />{distanceOrigin} 기준 · {formatDistance(restaurant.meters)}</p>
 }
 
+function MarkerSummary({ restaurant, useCurrentLocation, onClose, onDetails }) {
+  const [name, price, from] = restaurant.menu[0] ?? []
+  return <section className="marker-detail" aria-label="선택한 식당" onKeyDown={event => {
+    if (event.key === 'Escape') onClose()
+  }}>
+    <div className="section-title">
+      <h3>{restaurant.name}</h3>
+      <button className="map-close" onClick={onClose} aria-label="식당 요약 닫기">×</button>
+    </div>
+    <p>{name ?? '대표 메뉴 확인 필요'} · {menuPrice(price, from)}</p>
+    <div className="section-title">
+      <p className="muted fine">{useCurrentLocation ? '내 위치' : '학교'} 기준 · {formatDistance(restaurant.meters)}</p>
+      <button className="secondary" onClick={onDetails}>상세 보기</button>
+    </div>
+  </section>
+}
+
 function ExternalMapLink({ restaurant }) {
   return <a href={restaurant.mapUrl} target="_blank" rel="noreferrer">{restaurant.position ? '외부 지도에서 위치 보기' : '외부 지도에서 식당 검색'}</a>
 }
 
+function menuPrice(price, from) {
+  return price == null ? '가격 정보 확인 필요' : won(price) + (from ? '부터' : '')
+}
+
 function RestaurantMenu({ restaurant }) {
-  return restaurant.menu.length ? restaurant.menu.map(([name, price, from]) => <div className="line" key={name}><span>{name}</span><strong>{price == null ? '가격 정보 확인 필요' : won(price) + (from ? '부터' : '')}</strong></div>)
+  return restaurant.menu.length ? restaurant.menu.map(([name, price, from]) => <div className="line" key={name}><span>{name}</span><strong>{menuPrice(price, from)}</strong></div>)
     : <p className="muted">메뉴와 가격 정보 확인 필요</p>
 }
 
@@ -233,7 +241,7 @@ function Detail({ restaurant, date, visits, location, distanceOrigin, recommenda
   const values = hours.map(hour => predict(restaurant, date, visits, hour).wait)
   const max = Math.max(1, ...values)
   return <>
-    <button className="secondary back" onClick={onBack}>돌아가기</button>
+    <button className="secondary back" onClick={onBack} aria-label="상세 닫기">× 닫기</button>
     <section className="panel content">
       <div className="detail-heading"><span className="food-icon">{restaurant.icon}</span><h1>{restaurant.name}</h1></div>
       <RestaurantLocation restaurant={restaurant} distanceOrigin={distanceOrigin} />
