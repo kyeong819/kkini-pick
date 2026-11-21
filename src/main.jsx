@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { campus, categories, compareDistance, crowdLabel, days, formatDistance, hours, initialState, loadState, newVisitId, predict, ratingLabels, recommend, requestLocation, restaurantForRecord, restaurants, storageKey, straightDistance, summarize, tomorrow, weekday } from './model'
+import { campus, categories, crowdLabel, days, formatDistance, hours, initialState, loadState, newVisitId, predict, ratingLabels, recommend, requestLocation, restaurantForRecord, restaurants, storageKey, straightDistance, summarize, tomorrow, weekday } from './model'
 import CampusMap from './CampusMap'
 import './style.css'
 
@@ -22,14 +22,12 @@ function App() {
   const [location, setLocation] = useState(null)
   const [locating, setLocating] = useState(false)
   const [locationError, setLocationError] = useState('')
-  const [nearest, setNearest] = useState(false)
   const { date, visits, pending, filters } = state
   const distanceOrigin = location ? '내 위치' : '국립한밭대학교 유성덕명캠퍼스'
   const dining = restaurants.map(restaurant => ({
     ...predict(restaurant, date, visits),
     meters: straightDistance(location ?? campus, restaurant.position),
   }))
-  const nearby = nearest ? [...dining].sort(compareDistance) : dining
   const picks = recommend(dining, filters)
   const current = dining.find(restaurant => restaurant.id === detail)
   const selectedOnMap = dining.find(restaurant => restaurant.id === mapSelection)
@@ -68,7 +66,6 @@ function App() {
     setLocationError('')
     const usePosition = position => {
       setLocation(position)
-      setNearest(true)
       setLocating(false)
     }
     const useCampus = message => {
@@ -148,28 +145,17 @@ function App() {
           </form>
           <div className="dashboard">
             <section className="panel map-card">
-              <div className="section-title"><h2>캠퍼스 주변</h2><span className="badge">{nearby.length}곳</span></div>
+              <div className="section-title"><h2>캠퍼스 주변</h2><span className="badge">지도에 {restaurants.filter(restaurant => restaurant.position).length}곳</span></div>
               <div className="location-actions">
                 <button className="primary" onClick={findNearby} disabled={locating}>
                   {locating ? '위치 확인 중…' : locationError ? '위치 권한 다시 요청하기' : '내 위치로 주변 식당 찾기'}
                 </button>
-                {(location || locationError) && <button className="secondary" disabled={locating} onClick={() => {
-                  centerOnCampus()
-                  setNearest(true)
-                }}>학교 기준으로 보기</button>}
+                {(location || locationError) && <button className="secondary" disabled={locating} onClick={centerOnCampus}>학교 기준으로 보기</button>}
               </div>
               {locationError && <p role="status" className="muted fine">{locationError}</p>}
-              <CampusMap location={location} selectedId={mapSelection} onSelect={setMapSelection} centerRevision={mapCenterRevision} recommendations={picks}>
-                {selectedOnMap && <MarkerSummary restaurant={selectedOnMap} useCurrentLocation={Boolean(location)}
-                  onClose={() => setMapSelection(null)} onDetails={() => openDetail(selectedOnMap.id)} />}
-              </CampusMap>
-              <label className="distance-sort">정렬
-                <select value={nearest ? 'nearest' : 'default'} onChange={event => setNearest(event.target.value === 'nearest')}>
-                  <option value="default">기본순</option>
-                  <option value="nearest">가까운 식당순</option>
-                </select>
-              </label>
-              {nearby.map(restaurant => <RestaurantCard key={restaurant.id} restaurant={restaurant} onOpen={openDetail} />)}
+              <CampusMap location={location} selectedId={mapSelection} onSelect={setMapSelection} centerRevision={mapCenterRevision} recommendations={picks} />
+              {selectedOnMap && <SelectedRestaurant restaurant={selectedOnMap} useCurrentLocation={Boolean(location)}
+                onClose={() => setMapSelection(null)} onDetails={() => openDetail(selectedOnMap.id)} />}
             </section>
             <section className="panel picks">
               <div className="section-title"><h2>오늘의 추천</h2><span className="badge">{picks.length}곳</span></div>
@@ -207,18 +193,23 @@ function RestaurantLocation({ restaurant, distanceOrigin }) {
   return <p>{restaurant.category} · {restaurant.address}<br />{distanceOrigin} 기준 · {formatDistance(restaurant.meters)}</p>
 }
 
-function MarkerSummary({ restaurant, useCurrentLocation, onClose, onDetails }) {
+function SelectedRestaurant({ restaurant, useCurrentLocation, onClose, onDetails }) {
   const [name, price, from] = restaurant.menu[0] ?? []
+  const { latitude, longitude } = restaurant.position
+  const destination = encodeURIComponent(latitude + ',' + longitude)
   return <section className="marker-detail" aria-label="선택한 식당" onKeyDown={event => {
     if (event.key === 'Escape') onClose()
   }}>
     <div className="section-title">
-      <h3>{restaurant.name}</h3>
-      <button className="map-close" onClick={onClose} aria-label="식당 요약 닫기">×</button>
+      <div><p className="muted fine">{restaurant.category}</p><h3>{restaurant.name}</h3></div>
+      <button className="map-close" onClick={onClose} aria-label="선택한 식당 닫기">×</button>
     </div>
-    <p>{name ?? '대표 메뉴 확인 필요'} · {menuPrice(price, from)}</p>
-    <div className="section-title">
-      <p className="muted fine">{useCurrentLocation ? '내 위치' : '학교'} 기준 · {formatDistance(restaurant.meters)}</p>
+    <p>{name ?? '대표 메뉴 확인 필요'} · <strong>{menuPrice(price, from)}</strong></p>
+    <p className="muted">{restaurant.address}</p>
+    <p className="muted fine">{useCurrentLocation ? '내 위치' : '학교'} 기준 {formatDistance(restaurant.meters)}</p>
+    <div className="location-actions">
+      <a className="map-directions" href={'https://www.google.com/maps/dir/?api=1&travelmode=transit&destination=' + destination}
+        target="_blank" rel="noreferrer" aria-label="대중교통 길찾기">길찾기</a>
       <button className="secondary" onClick={onDetails}>상세 보기</button>
     </div>
   </section>

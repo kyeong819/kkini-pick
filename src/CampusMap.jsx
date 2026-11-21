@@ -54,7 +54,7 @@ function createRestaurantMarkers(map, onSelect) {
   })
 }
 
-export default function CampusMap({ location, selectedId, onSelect, centerRevision, recommendations = [], children }) {
+export default function CampusMap({ location, selectedId, onSelect, centerRevision, recommendations = [] }) {
   const container = useRef(null)
   const instance = useRef(null)
   const [tileError, setTileError] = useState(false)
@@ -151,14 +151,13 @@ export default function CampusMap({ location, selectedId, onSelect, centerRevisi
               {location ? ` GPS 정확도 약 ±${Math.ceil(location.accuracy)} m.` : <> <a href={campus.source} target="_blank" rel="noreferrer">학교 기준점 확인</a></>}
             </p>
             {locationOutside && <p>내 위치가 현재 지도 범위 밖이에요. 지도를 직접 이동해 확인할 수 있어요.</p>}
-            <p>좌표가 확인되지 않은 식당은 목록에서 볼 수 있어요.</p>
+            <p>지도에는 좌표가 확인된 식당을 표시해요.</p>
           </div>
         </details>
       </div>
-      {children}
     </div>
     {tileError && <div className="campus-map-tools">
-      <p role="status" className="muted">일부 지도 타일을 불러오지 못했어요. 마커와 식당 목록은 계속 이용할 수 있어요.</p>
+      <p role="status" className="muted">일부 지도 타일을 불러오지 못했어요. 마커와 추천은 계속 이용할 수 있어요.</p>
       <button className="secondary" onClick={() => {
         setTileError(false)
         instance.current.tiles.redraw()
